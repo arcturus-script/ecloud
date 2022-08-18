@@ -108,7 +108,7 @@ class Cloud:
 
     # 抽取关键字
     @staticmethod
-    def extract(raw: str, regEx: str) -> str | None:
+    def extract(raw: str, regEx: str):
         res = compile(regEx).findall(raw)
 
         if len(res) != 0:

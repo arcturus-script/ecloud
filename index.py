@@ -3,7 +3,7 @@ from ecloud import Cloud
 from push import push
 
 
-def main():
+def main(*arg):
     pushType = config.get("push")
     key = config.get("key")
 
