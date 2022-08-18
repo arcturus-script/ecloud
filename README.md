@@ -1,0 +1,1 @@
+推送类型有: `workWechat` `qmsg` `workWechatRobot` `server` `pushplus`
