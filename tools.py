@@ -1,6 +1,29 @@
 import string
 
 
+def handler(fn):
+    def inner(*args, **kwargs):
+        res = fn(*args, **kwargs)
+
+        return [
+            {
+                "h4": {
+                    "content": res["account"],
+                },
+                "table": {
+                    "contents": [
+                        ("描述", "内容"),
+                        ("签到奖励", f"{res['reward']}M"),
+                        ("第一次抽奖", res["prize1"]),
+                        ("第二次抽奖", res["prize2"]),
+                    ]
+                },
+            },
+        ]
+
+    return inner
+
+
 def _chr(a):
     return f"{string.digits}{string.ascii_lowercase}"[a]
 
