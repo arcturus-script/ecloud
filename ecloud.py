@@ -1,9 +1,8 @@
 import requests as req
+import rsa
 from tools import failed, handler, success, b64ToHex
 from base64 import b64encode
 from urllib.parse import urlparse, parse_qs
-from Crypto.PublicKey import RSA
-from Crypto.Cipher import PKCS1_v1_5
 from time import time
 
 KEY = "-----BEGIN PUBLIC KEY-----\n<% pubkey %>\n-----END PUBLIC KEY-----"
@@ -31,19 +30,19 @@ class Cloud:
         self.account = config.get("account")
         self.password = config.get("password")
         self.client = req.Session()
-        self.init_cipher()
+        self.init()
 
-    def init_cipher(self):
+    def init(self):
         resp = req.post(ENCRYPT, data={"appId": "cloud"}).json()
 
         if resp.get("result") == 0:
             success("get encrypt config.")
-
+            
             pubkey_str = resp.get("data").get("pubKey")
             self.pre = resp.get("data").get("pre")
 
-            pubkey = RSA.import_key(KEY.replace("<% pubkey %>", pubkey_str))
-            self.cipher = PKCS1_v1_5.new(pubkey)
+            pubkey = KEY.replace("<% pubkey %>", pubkey_str).encode()
+            self.pubkey = rsa.PublicKey.load_pkcs1_openssl_pem(pubkey)
 
         else:
             failed("can not get encrypt config.")
@@ -73,7 +72,7 @@ class Cloud:
         return lt, reqId, resp.url
 
     def encrypt(self, s: str):
-        b = self.cipher.encrypt(s.encode())
+        b = rsa.encrypt(s.encode(), self.pubkey)
         return f"{self.pre}{b64ToHex(b64encode(b).decode())}"
 
     def login(self):
