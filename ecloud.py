@@ -26,19 +26,6 @@ U1 = "https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action?taskId=TASK_SIGNIN
 
 U2 = "https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action?taskId=TASK_SIGNIN_PHOTOS&activityId=ACT_SIGNIN"
 
-
-# def rsa_encode(rsaKey, string):
-#     rsaKey = (
-#
-#     )
-
-#     pubkey = rsa.PublicKey.load_pkcs1_openssl_pem(rsaKey.encode())
-
-#     result = b64ToHex(base64.b64encode(rsa.encrypt(string.encode(), pubkey)).decode())
-
-#     return result
-
-
 class Cloud:
     def __init__(self, **config):
         self.account = config.get("account")
