@@ -58,3 +58,18 @@ def b64ToHex(a):
     if e == 1:
         d += _chr(c << 2)
     return d
+
+
+def failed(*args, **kwargs):
+    print("[\033[31mfailed\033[0m]  ", end="")
+    print(*args, **kwargs)
+
+
+def success(*args, **kwargs):
+    print("[\033[32msuccess\033[0m] ", end="")
+    print(*args, **kwargs)
+
+
+def info(*args, **kwargs):
+    print("[\033[34minfo\033[0m]    ", end="")
+    print(*args, **kwargs)
