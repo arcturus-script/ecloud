@@ -1,34 +1,42 @@
-import base64
-import time
 import requests as req
-from tools import b64ToHex, handler
-from re import compile
-import rsa
+from tools import failed, handler, success, b64ToHex
+from base64 import b64encode
+from urllib.parse import urlparse, parse_qs
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_v1_5
+from time import time
 
-LOGIN = "https://cloud.189.cn/api/portal/loginUrl.action"
+KEY = "-----BEGIN PUBLIC KEY-----\n<% pubkey %>\n-----END PUBLIC KEY-----"
 
-SUBMIT = "https://open.e.189.cn/api/logbox/oauth2/loginSubmit.do"
+BASE_URL = "https://open.e.189.cn"
 
-SIGN = "https://api.cloud.189.cn/mkt/userSign.action"
+APP_CONFIG = f"{BASE_URL}/api/logbox/oauth2/appConf.do"
+
+NEED_CAPTCHA = f"{BASE_URL}/api/logbox/oauth2/needcaptcha.do"
+
+ENCRYPT = f"{BASE_URL}/api/logbox/config/encryptConf.do"
+
+LOGIN_SUBMIT = f"{BASE_URL}/api/logbox/oauth2/loginSubmit.do"
+
+USER_SIGN = "https://api.cloud.189.cn/mkt/userSign.action"
+
+LOGIN_URL = "https://cloud.189.cn/api/portal/loginUrl.action?redirectURL=https://cloud.189.cn/web/redirect.html"
+
+U1 = "https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action?taskId=TASK_SIGNIN&activityId=ACT_SIGNIN"
+
+U2 = "https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action?taskId=TASK_SIGNIN_PHOTOS&activityId=ACT_SIGNIN"
 
 
-def rsa_encode(rsaKey, string):
-    rsaKey = (
-        f"-----BEGIN PUBLIC KEY-----\n{rsaKey}\n-----END PUBLIC KEY-----"  # noqa: E501
-    )
+# def rsa_encode(rsaKey, string):
+#     rsaKey = (
+#
+#     )
 
-    pubkey = rsa.PublicKey.load_pkcs1_openssl_pem(rsaKey.encode())
+#     pubkey = rsa.PublicKey.load_pkcs1_openssl_pem(rsaKey.encode())
 
-    result = b64ToHex(base64.b64encode(rsa.encrypt(string.encode(), pubkey)).decode())
+#     result = b64ToHex(base64.b64encode(rsa.encrypt(string.encode(), pubkey)).decode())
 
-    return result
-
-
-def extract(raw: str, regEx: str):
-    res = compile(regEx).findall(raw)
-
-    if len(res) != 0:
-        return res[0]
+#     return result
 
 
 class Cloud:
@@ -36,62 +44,139 @@ class Cloud:
         self.account = config.get("account")
         self.password = config.get("password")
         self.client = req.Session()
+        self.init_cipher()
 
-    @handler
-    def start(self):
-        res = self.checkIn()
+    def init_cipher(self):
+        resp = req.post(ENCRYPT, data={"appId": "cloud"}).json()
 
-        res.update({"account": self.account})
+        if resp.get("result") == 0:
+            success("get encrypt config.")
 
-        return res
+            pubkey_str = resp.get("data").get("pubKey")
+            self.pre = resp.get("data").get("pre")
+
+            pubkey = RSA.import_key(KEY.replace("<% pubkey %>", pubkey_str))
+            self.cipher = PKCS1_v1_5.new(pubkey)
+
+        else:
+            failed("can not get encrypt config.")
+
+    @staticmethod
+    def app_config(lt: str, reqId: str):
+        data = {"version": 2.0, "appKey": "cloud"}
+        headers = {"lt": lt, "reqId": reqId}
+        resp = req.post(APP_CONFIG, data=data, headers=headers).json()
+
+        if resp.get("result") == "0":
+            success("get app config.")
+        else:
+            failed("get app config.")
+
+        return resp.get("data")
+
+    @staticmethod
+    def lt_reqid_url():
+        resp = req.get(LOGIN_URL, allow_redirects=True)
+
+        url = urlparse(resp.url)
+        query = parse_qs(url.query)
+        lt = query.get("lt")[0]
+        reqId = query.get("reqId")[0]
+
+        return lt, reqId, resp.url
+
+    def encrypt(self, s: str):
+        b = self.cipher.encrypt(s.encode())
+        return f"{self.pre}{b64ToHex(b64encode(b).decode())}"
+
+    def login(self):
+        self.lt, self.reqId, url = Cloud.lt_reqid_url()
+
+        resp = Cloud.app_config(self.lt, self.reqId)
+
+        self.headers = {
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36 Edg/113.0.1774.57",
+            "origin": "https://open.e.189.cn",
+            "referer": url,
+            "lt": self.lt,
+            "reqid": self.reqId,
+        }
+
+        data = {
+            "version": "v2.0",
+            "apToken": "",
+            "appKey": "cloud",
+            "accountType": "01",
+            "userName": self.encrypt(self.account),
+            "password": self.encrypt(self.password),
+            "validateCode": "",
+            "captchaToken": "",
+            "returnUrl": resp.get("returnUrl"),
+            "mailSuffix": "@189.cn",
+            "dynamicCheck": "FALSE",
+            "clientType": "1",
+            "cb_SaveName": "0",
+            "isOauth2": "false",
+            "state": "",
+            "paramId": resp.get("paramId"),
+        }
+
+        resp = self.client.post(
+            LOGIN_SUBMIT,
+            data=data,
+            headers=self.headers,
+            timeout=5,
+        ).json()
+
+        if resp.get("result") == 0:
+            success(resp.get("msg"))
+        else:
+            failed("登录失败")
+
+        self.client.get(resp.get("toUrl"))
 
     def checkIn(self):
         self.login()
 
         headers = {
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X)",  # noqa: E501
-            "Referer": "https://m.cloud.189.cn/zhuanti/2016/sign/index.jsp?albumBackupOpened=1",  # noqa: E501
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X)",
+            "Referer": "https://m.cloud.189.cn/zhuanti/2016/sign/index.jsp?albumBackupOpened=1",
             "Host": "m.cloud.189.cn",
             "Accept-Encoding": "gzip, deflate",
         }
 
         resp = self.client.get(
-            SIGN,
+            USER_SIGN,
             params={
-                "rand": str(round(time.time() * 1000)),
+                "rand": str(round(time() * 1000)),
                 "clientType": "TELEANDROID",
                 "version": "8.6.3",
             },
             headers=headers,
         ).json()
 
-        reward = resp["netdiskBonus"]
+        reward = resp.get("netdiskBonus")
 
-        if resp["isSign"] == "false":
-            print(f"签到获得 {reward}M 空间")
+        if not resp.get("isSign"):
+            success(f"签到获得 {reward}M 空间")
         else:
-            print(f"已经签到过了, 签到获得 {reward}M 空间")
+            success(f"已经签到过了, 签到获得 {reward}M 空间")
 
-        url1 = "https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action?taskId=TASK_SIGNIN&activityId=ACT_SIGNIN"  # noqa: E501
-
-        url2 = "https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action?taskId=TASK_SIGNIN_PHOTOS&activityId=ACT_SIGNIN"  # noqa: E501
-
-        # 两次抽奖
         prizes = []
 
-        for u in [url1, url2]:
+        for u in [U1, U2]:
             resp = self.client.get(u, headers=headers).json()
 
             if "errorCode" in resp:
-                msg = resp["errorCode"]
+                msg = resp.get("errorCode")
 
-                print(msg)
+                failed(msg)
 
                 prizes.append(msg)
             else:
                 prize = resp.get("prizeName")
 
-                print(f"抽奖获得 {prize}")
+                success(f"抽奖获得{prize}")
 
                 prizes.append(prize)
 
@@ -101,41 +186,9 @@ class Cloud:
             "prize2": prizes[1],
         }
 
-    # 登录
-    def login(self):
-        resp = self.client.get(
-            LOGIN,
-            params={
-                "redirectURL": "https://cloud.189.cn/web/redirect.html?returnURL=/main.action",  # noqa: E501
-            },
-        )
+    @handler
+    def start(self):
+        res = self.checkIn()
+        res.update({"account": self.account})
 
-        captchaToken = extract(resp.text, "'captchaToken' value='(.+?)'")
-        lt = extract(resp.text, 'lt = "(.+?)"')
-        returnUrl = extract(resp.text, "returnUrl = '(.+?)'")
-        paramId = extract(resp.text, 'paramId = "(.+?)"')
-        j_rsakey = extract(resp.text, '"j_rsaKey" value="(.+?)"')
-
-        headers = {
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X)",  # noqa: E501
-            "Referer": "https://open.e.189.cn/",
-            "lt": lt,
-        }
-
-        data = {
-            "appKey": "cloud",
-            "accountType": "01",
-            "userName": f"{{RSA}}{rsa_encode(j_rsakey, self.account)}",
-            "password": f"{{RSA}}{rsa_encode(j_rsakey, self.password)}",
-            "validateCode": "",
-            "captchaToken": captchaToken,
-            "returnUrl": returnUrl,
-            "mailSuffix": "@189.cn",
-            "paramId": paramId,
-        }
-
-        resp = self.client.post(SUBMIT, data=data, headers=headers, timeout=5).json()
-
-        print(resp.get("msg"))
-
-        self.client.get(resp["toUrl"])
+        return res
