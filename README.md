@@ -12,4 +12,4 @@ git clone --recursive https://github.com/arcturus-script/ecloud.git
 
 2. ctrl + ` 进入终端
 
-3. 输入 `pip3 install -r ./src/requirements.txt -t ./src` 安装依赖
+3. 输入 `pip3 install -r ./src/requirements.txt -t ./src` 安装依赖( 这个路径每个云函数可能不一样, 总之就是把依赖下到 index.py 的目录 )
