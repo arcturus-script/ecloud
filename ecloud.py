@@ -1,6 +1,6 @@
 import requests as req
 import rsa
-from tools import failed, handler, success, b64ToHex
+from tools import failed, success, b64ToHex
 from base64 import b64encode
 from urllib.parse import urlparse, parse_qs
 from time import time
@@ -9,23 +9,8 @@ KEY = "-----BEGIN PUBLIC KEY-----\n<% pubkey %>\n-----END PUBLIC KEY-----"
 
 BASE_URL = "https://open.e.189.cn"
 
-APP_CONFIG = f"{BASE_URL}/api/logbox/oauth2/appConf.do"
 
-NEED_CAPTCHA = f"{BASE_URL}/api/logbox/oauth2/needcaptcha.do"
-
-ENCRYPT = f"{BASE_URL}/api/logbox/config/encryptConf.do"
-
-LOGIN_SUBMIT = f"{BASE_URL}/api/logbox/oauth2/loginSubmit.do"
-
-USER_SIGN = "https://api.cloud.189.cn/mkt/userSign.action"
-
-LOGIN_URL = "https://cloud.189.cn/api/portal/loginUrl.action?redirectURL=https://cloud.189.cn/web/redirect.html"
-
-U1 = "https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action?taskId=TASK_SIGNIN&activityId=ACT_SIGNIN"
-
-U2 = "https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action?taskId=TASK_SIGNIN_PHOTOS&activityId=ACT_SIGNIN"
-
-class Cloud:
+class ecloud:
     def __init__(self, **config):
         self.account = config.get("account")
         self.password = config.get("password")
@@ -33,25 +18,29 @@ class Cloud:
         self.init()
 
     def init(self):
-        resp = req.post(ENCRYPT, data={"appId": "cloud"}).json()
+        resp = req.post(
+            f"{BASE_URL}/api/logbox/config/encryptConf.do",
+            data={"appId": "cloud"},
+        ).json()
 
         if resp.get("result") == 0:
             success("get encrypt config.")
-            
+
             pubkey_str = resp.get("data").get("pubKey")
             self.pre = resp.get("data").get("pre")
 
             pubkey = KEY.replace("<% pubkey %>", pubkey_str).encode()
             self.pubkey = rsa.PublicKey.load_pkcs1_openssl_pem(pubkey)
-
         else:
             failed("can not get encrypt config.")
 
     @staticmethod
     def app_config(lt: str, reqId: str):
-        data = {"version": 2.0, "appKey": "cloud"}
-        headers = {"lt": lt, "reqId": reqId}
-        resp = req.post(APP_CONFIG, data=data, headers=headers).json()
+        resp = req.post(
+            f"{BASE_URL}/api/logbox/oauth2/appConf.do",
+            data={"version": 2.0, "appKey": "cloud"},
+            headers={"lt": lt, "reqId": reqId},
+        ).json()
 
         if resp.get("result") == "0":
             success("get app config.")
@@ -62,7 +51,11 @@ class Cloud:
 
     @staticmethod
     def lt_reqid_url():
-        resp = req.get(LOGIN_URL, allow_redirects=True)
+        resp = req.get(
+            "https://cloud.189.cn/api/portal/loginUrl.action",
+            params={"redirectURL": "https://cloud.189.cn/web/redirect.html"},
+            allow_redirects=True,
+        )
 
         url = urlparse(resp.url)
         query = parse_qs(url.query)
@@ -76,9 +69,9 @@ class Cloud:
         return f"{self.pre}{b64ToHex(b64encode(b).decode())}"
 
     def login(self):
-        self.lt, self.reqId, url = Cloud.lt_reqid_url()
+        self.lt, self.reqId, url = ecloud.lt_reqid_url()
 
-        resp = Cloud.app_config(self.lt, self.reqId)
+        resp = ecloud.app_config(self.lt, self.reqId)
 
         self.headers = {
             "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36 Edg/113.0.1774.57",
@@ -108,7 +101,7 @@ class Cloud:
         }
 
         resp = self.client.post(
-            LOGIN_SUBMIT,
+            f"{BASE_URL}/api/logbox/oauth2/loginSubmit.do",
             data=data,
             headers=self.headers,
             timeout=5,
@@ -117,7 +110,7 @@ class Cloud:
         if resp.get("result") == 0:
             success(resp.get("msg"))
         else:
-            failed("登录失败")
+            failed("Login failed.")
 
         self.client.get(resp.get("toUrl"))
 
@@ -132,7 +125,7 @@ class Cloud:
         }
 
         resp = self.client.get(
-            USER_SIGN,
+            "https://api.cloud.189.cn/mkt/userSign.action",
             params={
                 "rand": str(round(time() * 1000)),
                 "clientType": "TELEANDROID",
@@ -141,40 +134,78 @@ class Cloud:
             headers=headers,
         ).json()
 
-        reward = resp.get("netdiskBonus")
-
-        if not resp.get("isSign"):
-            success(f"签到获得 {reward}M 空间")
+        if "errorCode" in resp:
+            reward = f"【签到】{resp.get('errorCode')}, {resp.get('errorMsg')}"
+            failed(reward)
         else:
-            success(f"已经签到过了, 签到获得 {reward}M 空间")
+            r = resp.get("netdiskBonus")
+
+            if resp.get("isSign"):
+                reward = f"【已签】获得{r}M空间"
+            else:
+                reward = f"【签到】获得{r}M空间"
+
+            success(reward)
 
         prizes = []
 
-        for u in [U1, U2]:
+        urls = [
+            "https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action?taskId=TASK_SIGNIN&activityId=ACT_SIGNIN",
+            "https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action?taskId=TASK_SIGNIN_PHOTOS&activityId=ACT_SIGNIN",
+            "https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action?taskId=TASK_2022_FLDFS_KJ&activityId=ACT_SIGNIN",
+        ]
+
+        for idx, u in enumerate(urls):
             resp = self.client.get(u, headers=headers).json()
+            # print(resp)
 
-            if "errorCode" in resp:
-                msg = resp.get("errorCode")
-
-                failed(msg)
-
-                prizes.append(msg)
-            else:
-                prize = resp.get("prizeName")
-
-                success(f"抽奖获得{prize}")
-
+            if "prizeName" in resp:
+                p = resp.get("prizeName")
+                prize = f"【抽奖{idx+1}】{p}"
+                success(prize)
                 prizes.append(prize)
+            else:
+                if "errorCode" in resp:
+                    p = f"【抽奖{idx+1}】{resp.get('errorCode')}"
+                    errorMsg = resp.get("errorMsg")
+                    failed(p, errorMsg)
+                    prizes.append(p)
+                elif "error" in resp:
+                    p = f"【抽奖{idx+1}】{resp.get('error')}"
+                    failed(p)
+                    prizes.append(p)
 
         return {
             "reward": reward,
-            "prize1": prizes[0],
-            "prize2": prizes[1],
+            "prizes": prizes,
         }
 
-    @handler
     def start(self):
         res = self.checkIn()
-        res.update({"account": self.account})
 
-        return res
+        msg = [
+            {
+                "h4": {
+                    "content": "天翼云盘签到小助手",
+                },
+                "txt": {
+                    "content": f"【账号】{self.account}",
+                },
+            },
+            {
+                "txt": {
+                    "content": res.get("reward"),
+                },
+            },
+        ]
+
+        for p in res["prizes"]:
+            msg.append(
+                {
+                    "txt": {
+                        "content": p,
+                    }
+                }
+            )
+
+        return {"title": "天翼云盘签到小助手", "message": msg}
