@@ -1,9 +1,10 @@
+import random
 import requests as req
 import rsa
 from tools import failed, success, b64ToHex
 from base64 import b64encode
 from urllib.parse import urlparse, parse_qs
-from time import time
+from time import time, sleep
 
 KEY = "-----BEGIN PUBLIC KEY-----\n<% pubkey %>\n-----END PUBLIC KEY-----"
 
@@ -174,6 +175,8 @@ class ecloud:
                     p = f"【抽奖{idx+1}】{resp.get('error')}"
                     failed(p)
                     prizes.append(p)
+
+                sleep(random.randint(5, 10))
 
         return {
             "reward": reward,
